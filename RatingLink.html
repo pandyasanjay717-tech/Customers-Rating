@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rate Your Order - YesBag</title>
+    <style>
+        body { font-family: 'Segoe UI', sans-serif; background: #f8f9fa; text-align: center; padding: 20px; }
+        .container { background: white; padding: 25px; border-radius: 12px; max-width: 400px; margin: 40px auto; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
+        h1 { color: #2c3e50; font-size: 24px; margin-bottom: 10px; }
+        p { color: #6c757d; margin-bottom: 20px; }
+        .rating-stars { font-size: 36px; color: #ffc107; cursor: pointer; margin-bottom: 20px; }
+        .star { cursor: pointer; transition: color 0.2s; }
+        .star:hover, .star.active { color: #ff9800; }
+        textarea { width: 95%; padding: 10px; border: 1px solid #ddd; border-radius: 8px; resize: none; margin-bottom: 15px; }
+        button { background: #008000; color: white; border: none; padding: 12px 20px; border-radius: 8px; cursor: pointer; font-size: 16px; font-weight: bold; width: 100%; }
+        button:hover { background: #006400; }
+        .message { margin-top: 20px; font-weight: bold; color: #28a745; }
+        .disabled-message { color: #dc3545; font-size: 18px; padding: 20px; border: 1px dashed #dc3545; border-radius: 8px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🌟 Rate Your Order!</h1>
+        <p id="order-id-display">Order #XXXXXX</p>
+        
+        <div id="review-form">
+            <div class="rating-stars" id="star-rating">
+                <span class="star" data-rating="1">★</span>
+                <span class="star" data-rating="2">★</span>
+                <span class="star" data-rating="3">★</span>
+                <span class="star" data-rating="4">★</span>
+                <span class="star" data-rating="5">★</span>
+            </div>
+            
+            <textarea id="review-text" rows="4" placeholder="Share your feedback here (optional)"></textarea>
+            
+            <button onclick="submitReview()">Submit Review</button>
+        </div>
+
+        <div class="message" id="response-message"></div>
+    </div>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+        import { getDatabase, ref, set, update, get } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js";
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyAmAI2z12tk2bnlm__JT24ZGr5giB7Wpk0",
+            authDomain: "yesbag-84897.firebaseapp.com",
+            databaseURL: "https://yesbag-84897-default-rtdb.firebaseio.com",
+            projectId: "yesbag-84897",
+            storageBucket: "yesbag-84897.firebasestorage.app",
+            messagingSenderId: "2154662115",
+            appId: "1:2154662115:web:3382afabeff5519510ddd6"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const db = getDatabase(app);
+
+        let selectedRating = 0;
+        const urlParams = new URLSearchParams(window.location.search);
+        const orderId = urlParams.get('orderId');
+        
+        const formElement = document.getElementById('review-form');
+        const messageElement = document.getElementById('response-message');
+        
+        // 🔥 CRITICAL: Variable to store the product ID from the order
+        let reviewedProductId = null; 
+
+        if (orderId) {
+            document.getElementById('order-id-display').textContent = `Order #${orderId.slice(-6)}`;
+            checkIfReviewed();
+        } else {
+            document.getElementById('order-id-display').textContent = 'Error: Order ID not found.';
+            formElement.innerHTML = `<div class="disabled-message">Cannot load order details.</div>`;
+        }
+
+        async function checkIfReviewed() {
+            try {
+                const orderSnapshot = await get(ref(db, `orders/${orderId}`));
+                const order = orderSnapshot.val();
+
+                if (!order) {
+                    formElement.innerHTML = `<div class="disabled-message">Order not found or invalid.</div>`;
+                    return;
+                }
+                
+                // 🔥 CRITICAL: Get the Product ID from the Order
+                if (order.cart && order.cart.length > 0) {
+                     reviewedProductId = order.cart[0].id; 
+                } else {
+                     formElement.innerHTML = `<div class="disabled-message">Order contains no products. Cannot review.</div>`;
+                     return;
+                }
+
+                if (order.isReviewed) {
+                    formElement.innerHTML = `<div class="disabled-message">This order has already been reviewed. Thank you!</div>`;
+                    messageElement.textContent = '';
+                } else if (order.status !== 'delivered') {
+                    formElement.innerHTML = `<div class="disabled-message">Review links are only available after delivery.</div>`;
+                    messageElement.textContent = '';
+                } else {
+                    initializeStarListeners();
+                }
+            } catch (error) {
+                console.error("Error checking review status:", error);
+                messageElement.textContent = 'Error loading order status.';
+            }
+        }
+        
+        function initializeStarListeners() {
+            const stars = document.querySelectorAll('.star');
+            stars.forEach(star => {
+                star.addEventListener('click', () => {
+                    selectedRating = parseInt(star.dataset.rating);
+                    updateStars(selectedRating);
+                });
+                star.addEventListener('mouseover', () => updateStars(parseInt(star.dataset.rating), true));
+                star.addEventListener('mouseout', () => updateStars(selectedRating));
+            });
+        }
+
+        function updateStars(rating, preview = false) {
+            const stars = document.querySelectorAll('.star');
+            stars.forEach(star => {
+                const starRating = parseInt(star.dataset.rating);
+                const isActive = starRating <= rating;
+                star.style.color = isActive ? (preview ? '#ff9800' : '#ffc107') : '#ddd';
+            });
+        }
+
+        window.submitReview = async () => {
+            const reviewText = document.getElementById('review-text').value.trim();
+            
+            if (selectedRating === 0) {
+                messageElement.textContent = 'Please select a star rating!';
+                messageElement.style.color = '#dc3545';
+                return;
+            }
+            
+            if (!reviewedProductId) {
+                 messageElement.textContent = 'Error: Product ID missing. Cannot submit review.';
+                 messageElement.style.color = '#dc3545';
+                 return;
+            }
+
+            messageElement.textContent = 'Submitting review...';
+            messageElement.style.color = '#17a2b8';
+
+            const reviewData = {
+                rating: selectedRating,
+                review: reviewText,
+                timestamp: new Date().toISOString(),
+                orderId: orderId,
+                // 🔥 CRITICAL: Save both productId and review text
+                productId: reviewedProductId 
+            };
+
+            try {
+                // 1. Save the review
+                await set(ref(db, `reviews/${orderId}`), reviewData);
+                
+                // 2. Add the reviewed flag AND THE REVIEW DATA to the order (for seller page visibility)
+                // Seller page ko is review ki zaroorat padegi
+                await update(ref(db, `orders/${orderId}`), { 
+                    isReviewed: true,
+                    reviewData: {
+                        rating: selectedRating,
+                        review: reviewText
+                    }
+                });
+
+                messageElement.textContent = 'Thank you for your feedback! 🙏';
+                messageElement.style.color = '#008000';
+                formElement.innerHTML = `<div class="disabled-message" style="border-color:#008000; color:#008000;">Review submitted successfully!</div>`;
+
+            } catch (error) {
+                console.error("Error writing review to database: ", error);
+                messageElement.textContent = 'Submission failed. Please try again.';
+                messageElement.style.color = '#dc3545';
+            }
+        };
+        
+        if (orderId) {
+            checkIfReviewed();
+        }
+    </script>
+</body>
+</html>
